@@ -1,5 +1,5 @@
-from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional, List, Union, Any, Literal, Generic, TypeVar
+from pydantic import BaseModel, Field, ConfigDict, field_validator
+from typing import Optional, List, Union, Any, Literal, Generic, TypeVar, Dict
 from datetime import datetime
 from enum import Enum
 
@@ -81,6 +81,9 @@ class TypeLayout(str, Enum):
     PROFILE = "profile"
     ACTION = "action"
     NOTE = "note"
+    BOOKMARK = "bookmark"
+    COLLECTION = "collection"
+    SET = "set"
 
 class MemberRole(str, Enum):
     VIEWER = "viewer"
@@ -300,11 +303,25 @@ class Type(BaseModel):
     archived: bool = False
     object: Optional[str] = None
     properties: Optional[List[PropertyWithValue]] = None
+    
+    @field_validator('layout', mode='before')
+    @classmethod
+    def validate_layout(cls, v):
+        """Валидатор для layout, который принимает любые строки"""
+        if isinstance(v, str):
+            try:
+                return TypeLayout(v)
+            except ValueError:
+                # Если значение не в enum, возвращаем BASIC как запасной вариант
+                return TypeLayout.BASIC
+        return v
 
 # Object model
 class Object(BaseModel):
     id: str
     name: Optional[str] = None
+    title: Optional[str] = None
+    display_name: Optional[str] = None
     icon: Optional[Icon] = None
     type: Optional[Type] = None
     space_id: str
@@ -313,6 +330,21 @@ class Object(BaseModel):
     snippet: Optional[str] = None
     object: Optional[str] = None
     properties: Optional[List[PropertyWithValue]] = None
+    
+    @field_validator('layout', mode='before')
+    @classmethod
+    def validate_object_layout(cls, v):
+        """Валидатор для object layout"""
+        if isinstance(v, str):
+            try:
+                return ObjectLayout(v)
+            except ValueError:
+                return ObjectLayout.BASIC
+        return v
+    
+    def get_display_name(self) -> str:
+        """Возвращает отображаемое имя объекта"""
+        return self.name or self.title or self.display_name or "Unnamed"
 
 class ObjectWithBody(Object):
     markdown: Optional[str] = None
@@ -337,6 +369,17 @@ class Member(BaseModel):
     role: MemberRole
     status: MemberStatus
     object: Optional[str] = None
+    
+    @field_validator('role', mode='before')
+    @classmethod
+    def validate_role(cls, v):
+        """Валидатор для роли"""
+        if isinstance(v, str):
+            try:
+                return MemberRole(v)
+            except ValueError:
+                return MemberRole.VIEWER
+        return v
 
 # Property model
 class Property(BaseModel):
@@ -483,6 +526,8 @@ class SortOptions(BaseModel):
 class CreateObjectRequest(BaseModel):
     type_key: str
     name: Optional[str] = None
+    title: Optional[str] = None
+    display_name: Optional[str] = None
     body: Optional[str] = None
     icon: Optional[Icon] = None
     template_id: Optional[str] = None
@@ -490,6 +535,8 @@ class CreateObjectRequest(BaseModel):
 
 class UpdateObjectRequest(BaseModel):
     name: Optional[str] = None
+    title: Optional[str] = None
+    display_name: Optional[str] = None
     markdown: Optional[str] = None
     icon: Optional[Icon] = None
     type_key: Optional[str] = None

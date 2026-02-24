@@ -1,5 +1,5 @@
 from contextlib import contextmanager
-from typing import Optional, List, Dict, Any, Generator
+from typing import Optional, List, Any, Generator
 from .client import AnytypeClient
 
 class AnytypeDB:
@@ -25,51 +25,6 @@ class Connection:
     def __init__(self, client: AnytypeClient, space_id: str):
         self.client = client
         self.space_id = space_id
-    
-    def execute(self, query: str, **params) -> Any:
-        """Выполнить 'SQL' запрос"""
-        # Простой парсинг запросов
-        query = query.strip().lower()
-        
-        if query.startswith('select'):
-            return self._select(params)
-        elif query.startswith('insert'):
-            return self._insert(params)
-        elif query.startswith('update'):
-            return self._update(params)
-        elif query.startswith('delete'):
-            return self._delete(params)
-        else:
-            raise ValueError(f"Unsupported query: {query}")
-    
-    def _select(self, params):
-        type_key = params.get('type')
-        filters = params.get('where', {})
-        
-        result = self.client.objects.list(
-            space_id=self.space_id,
-            filters=filters
-        )
-        return result.data
-    
-    def _insert(self, params):
-        return self.client.objects.create(
-            space_id=self.space_id,
-            **params
-        )
-    
-    def _update(self, params):
-        return self.client.objects.update(
-            space_id=self.space_id,
-            object_id=params['id'],
-            **params
-        )
-    
-    def _delete(self, params):
-        return self.client.objects.delete(
-            space_id=self.space_id,
-            object_id=params['id']
-        )
     
     def table(self, name: str) -> 'Table':
         """Получить таблицу по имени типа"""
@@ -101,10 +56,25 @@ class Table:
         )
     
     def find(self, **filters) -> List[Any]:
-        """Найти записи"""
+        """Найти записи - ИСПРАВЛЕНО"""
+        # Извлекаем limit если есть
+        limit = filters.pop('limit', 100)
+        
+        # Конвертируем фильтры в правильный формат
+        api_filters = {}
+        for key, value in filters.items():
+            if value is not None:
+                if "__" in key:
+                    # Оставляем сложные фильтры как есть
+                    api_filters[key] = value
+                else:
+                    # Для простых фильтров используем прямые ключи
+                    api_filters[key] = value
+        
         result = self.conn.client.objects.list(
             space_id=self.conn.space_id,
-            filters=filters
+            filters=api_filters,
+            limit=limit
         )
         return result.data
     

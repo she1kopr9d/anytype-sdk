@@ -1,5 +1,5 @@
 from contextlib import contextmanager
-from typing import Optional, List, Dict, Any, Generator
+from typing import Optional, List, Dict, Any, Generator, Union
 from .client import AnytypeClient
 from . import models
 
@@ -9,29 +9,37 @@ class AnytypeConnection:
     def __init__(self, client: AnytypeClient, space_id: str):
         self.client = client
         self.space_id = space_id
-        self._objects = ObjectsTable(self)
-        self._types = TypesTable(self)
-        self._properties = PropertiesTable(self)
-        self._tags = TagsTable(self)
+        self._objects = None
+        self._types = None
+        self._properties = None
+        self._tags = None
     
     @property
     def objects(self):
         """Таблица объектов"""
+        if self._objects is None:
+            self._objects = ObjectsTable(self)
         return self._objects
     
     @property
     def types(self):
         """Таблица типов"""
+        if self._types is None:
+            self._types = TypesTable(self)
         return self._types
     
     @property
     def properties(self):
         """Таблица свойств"""
+        if self._properties is None:
+            self._properties = PropertiesTable(self)
         return self._properties
     
     @property
     def tags(self):
         """Таблица тегов"""
+        if self._tags is None:
+            self._tags = TagsTable(self)
         return self._tags
     
     def query(self, type_key: str) -> 'QueryBuilder':
@@ -78,77 +86,161 @@ class ObjectsTable:
         )
     
     def find(self, **filters) -> List[models.Object]:
-        """Найти объекты по фильтрам (SELECT)"""
+        """Найти объекты по фильтрам (SELECT) - ИСПРАВЛЕНО"""
+        # Извлекаем limit если есть
+        limit = filters.pop('limit', 100)
+        
+        # Конвертируем фильтры в правильный формат для API
+        api_filters = {}
+        for key, value in filters.items():
+            if value is not None:
+                if "__" in key:
+                    # Оставляем сложные фильтры как есть
+                    api_filters[key] = value
+                else:
+                    # Для простых фильтров используем прямые ключи (без __eq)
+                    api_filters[key] = value
+        
         result = self.conn.client.objects.list(
             space_id=self.conn.space_id,
-            filters=filters
+            filters=api_filters,
+            limit=limit
         )
         return result.data
 
 class QueryBuilder:
-    """Построитель запросов - как SQLAlchemy или Django ORM"""
+    """Построитель запросов - исправленная версия"""
     
     def __init__(self, conn: AnytypeConnection, type_key: str):
         self.conn = conn
         self.type_key = type_key
-        self._filters = []
+        self._filters: List[Dict[str, Any]] = []
         self._limit = 100
         self._offset = 0
         self._order_by = None
         self._order_dir = "asc"
     
-    def filter(self, **conditions):
+    def filter(self, **conditions) -> 'QueryBuilder':
         """Добавить условия фильтрации"""
         for key, value in conditions.items():
-            if "__" in key:
-                field, op = key.split("__")
-            else:
-                field, op = key, "eq"
-            
-            self._filters.append({
-                "property_key": field,
-                "condition": self._map_operator(op),
-                "value": value
-            })
+            if value is not None:
+                if "__" in key:
+                    field, op = key.split("__")
+                    api_condition = self._map_operator(op)
+                else:
+                    field, op = key, "eq"
+                    api_condition = "eq"
+                
+                # Создаем фильтр в формате API
+                filter_item: Dict[str, Any] = {
+                    "property_key": field,
+                    "condition": api_condition
+                }
+                
+                # Добавляем значение в зависимости от типа
+                if isinstance(value, str):
+                    filter_item["text"] = value
+                elif isinstance(value, bool):
+                    filter_item["checkbox"] = value
+                elif isinstance(value, (int, float)):
+                    filter_item["number"] = value
+                elif isinstance(value, list):
+                    if all(isinstance(v, str) for v in value):
+                        filter_item["multi_select"] = value
+                    else:
+                        filter_item["objects"] = value
+                
+                self._filters.append(filter_item)
         return self
     
     def _map_operator(self, op: str) -> str:
-        """Маппинг операторов Django-like на операторы Anytype"""
+        """Маппинг операторов Django-like на операторы Anytype API"""
         mapping = {
-            "eq": "eq",
-            "exact": "eq",
-            "ne": "ne",
-            "gt": "gt",
-            "gte": "gte",
-            "lt": "lt",
-            "lte": "lte",
-            "contains": "contains",
-            "icontains": "contains",
-            "in": "in",
-            "isnull": "empty",
-            "notnull": "nempty"
+            "eq": "eq", "exact": "eq", "ne": "ne",
+            "gt": "gt", "gte": "gte", "lt": "lt", "lte": "lte",
+            "contains": "contains", "icontains": "contains",
+            "ncontains": "ncontains", "in": "in", "nin": "nin",
+            "isnull": "empty", "notnull": "nempty"
         }
         return mapping.get(op, "eq")
     
-    def limit(self, limit: int):
+    def _build_filter_expression(self) -> Optional[models.FilterExpression]:
+        """Построить FilterExpression из накопленных фильтров"""
+        if not self._filters:
+            return None
+        
+        conditions = []
+        for f in self._filters:
+            prop_key = f["property_key"]
+            condition = f["condition"]
+            
+            if "text" in f:
+                conditions.append(models.TextFilter(
+                    property_key=prop_key,
+                    condition=condition,
+                    text=f["text"]
+                ))
+            elif "number" in f:
+                conditions.append(models.NumberFilter(
+                    property_key=prop_key,
+                    condition=condition,
+                    number=f["number"]
+                ))
+            elif "checkbox" in f:
+                conditions.append(models.CheckboxFilter(
+                    property_key=prop_key,
+                    condition=condition,
+                    checkbox=f["checkbox"]
+                ))
+            elif "multi_select" in f:
+                conditions.append(models.MultiSelectFilter(
+                    property_key=prop_key,
+                    condition=condition,
+                    multi_select=f["multi_select"]
+                ))
+            elif condition in ["empty", "nempty"]:
+                conditions.append(models.EmptyFilter(
+                    property_key=prop_key,
+                    condition=condition
+                ))
+        
+        if conditions:
+            return models.FilterExpression(
+                operator=models.FilterOperator.AND,
+                conditions=conditions
+            )
+        return None
+    
+    def limit(self, limit: int) -> 'QueryBuilder':
         self._limit = min(limit, 1000)
         return self
     
-    def offset(self, offset: int):
+    def offset(self, offset: int) -> 'QueryBuilder':
         self._offset = offset
         return self
     
-    def order_by(self, field: str, direction: str = "asc"):
+    def order_by(self, field: str, direction: str = "asc") -> 'QueryBuilder':
         self._order_by = field
         self._order_dir = direction
         return self
     
     def all(self) -> List[models.Object]:
-        """Выполнить запрос и вернуть все результаты"""
-        # Здесь нужно построить FilterExpression из _filters
+        """Выполнить запрос и вернуть все результаты - ИСПРАВЛЕНО"""
+        filter_expr = self._build_filter_expression()
+        
+        # Создаем объект сортировки если нужно
+        sort_options = None
+        if self._order_by:
+            sort_options = models.SortOptions(
+                property_key=self._order_by,
+                direction=models.SortDirection.ASC if self._order_dir == "asc" else models.SortDirection.DESC
+            )
+        
         result = self.conn.client.search.search_in_space(
             space_id=self.conn.space_id,
             types=[self.type_key],
+            filters=filter_expr,
+            sort=sort_options,
             offset=self._offset,
             limit=self._limit
         )
@@ -161,10 +253,13 @@ class QueryBuilder:
         return results[0] if results else None
     
     def count(self) -> int:
-        """Вернуть количество результатов"""
+        """Вернуть количество результатов - ИСПРАВЛЕНО"""
+        filter_expr = self._build_filter_expression()
+        
         result = self.conn.client.search.search_in_space(
             space_id=self.conn.space_id,
             types=[self.type_key],
+            filters=filter_expr,
             offset=0,
             limit=1
         )
@@ -240,6 +335,7 @@ class AnytypeDatabase:
     def __init__(self, api_key: str, base_url: str = "http://127.0.0.1:31009"):
         self.api_key = api_key
         self.base_url = base_url
+        self.client = None
     
     @contextmanager
     def connect(self, space_id: str) -> Generator[AnytypeConnection, None, None]:

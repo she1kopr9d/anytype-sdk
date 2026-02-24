@@ -15,10 +15,16 @@ class Model(BaseModel):
     
     class Meta:
         type_key: str = ""
+        title_field: str = "name"  # Какое поле использовать как заголовок
     
     @classmethod
     def get_type_key(cls) -> str:
         return getattr(cls.Meta, 'type_key', cls.__name__.lower())
+    
+    @classmethod
+    def get_title_field(cls) -> str:
+        """Возвращает название поля для заголовка объекта"""
+        return getattr(cls.Meta, 'title_field', 'name')
     
     @classmethod
     def from_anytype_object(cls, obj: models.Object) -> 'Model':
@@ -36,10 +42,28 @@ class Model(BaseModel):
                     data[prop.key] = prop.checkbox
                 elif hasattr(prop, 'date') and prop.date is not None:
                     data[prop.key] = prop.date
-                # ... другие типы
+                elif hasattr(prop, 'select') and prop.select is not None:
+                    data[prop.key] = prop.select
+                elif hasattr(prop, 'multi_select') and prop.multi_select is not None:
+                    data[prop.key] = prop.multi_select
+                elif hasattr(prop, 'url') and prop.url is not None:
+                    data[prop.key] = prop.url
+                elif hasattr(prop, 'email') and prop.email is not None:
+                    data[prop.key] = prop.email
+                elif hasattr(prop, 'phone') and prop.phone is not None:
+                    data[prop.key] = prop.phone
+                elif hasattr(prop, 'files') and prop.files is not None:
+                    data[prop.key] = prop.files
+                elif hasattr(prop, 'objects') and prop.objects is not None:
+                    data[prop.key] = prop.objects
         
-        if obj.name:
+        # Название объекта может быть в разных полях
+        if hasattr(obj, 'name') and obj.name:
             data['name'] = obj.name
+        elif hasattr(obj, 'title') and obj.title:
+            data['title'] = obj.title
+        elif hasattr(obj, 'display_name') and obj.display_name:
+            data['display_name'] = obj.display_name
         
         return cls(**data)
     
@@ -48,7 +72,7 @@ class Model(BaseModel):
         properties = []
         
         for key, value in self.model_dump(exclude={'id', 'space_id'}).items():
-            if value is not None:
+            if value is not None and key != self.get_title_field():
                 if isinstance(value, str):
                     properties.append(models.TextPropertyLink(key=key, text=value))
                 elif isinstance(value, (int, float)):
@@ -57,25 +81,63 @@ class Model(BaseModel):
                     properties.append(models.CheckboxPropertyLink(key=key, checkbox=value))
                 elif isinstance(value, datetime):
                     properties.append(models.DatePropertyLink(key=key, date=value.isoformat()))
-                # ... другие типы
+                elif isinstance(value, list):
+                    # Предполагаем, что это multi_select
+                    properties.append(models.MultiSelectPropertyLink(key=key, multi_select=value))
         
         return properties
+    
+    def to_create_payload(self) -> Dict[str, Any]:
+        """Создает payload для создания объекта в API"""
+        payload = {
+            "type_key": self.get_type_key()
+        }
+        
+        # Добавляем заголовок (может быть name, title и т.д.)
+        title_field = self.get_title_field()
+        title_value = getattr(self, title_field, None)
+        if title_value:
+            payload[title_field] = title_value
+        
+        # Добавляем свойства
+        properties = self.to_properties()
+        if properties:
+            # Преобразуем список свойств в нужный формат
+            payload["properties"] = [
+                {"key": p.key, "value": p.text if hasattr(p, 'text') else 
+                                  p.number if hasattr(p, 'number') else
+                                  p.checkbox if hasattr(p, 'checkbox') else
+                                  p.date if hasattr(p, 'date') else
+                                  p.multi_select if hasattr(p, 'multi_select') else
+                                  p.select if hasattr(p, 'select') else
+                                  p.url if hasattr(p, 'url') else
+                                  p.email if hasattr(p, 'email') else
+                                  p.phone if hasattr(p, 'phone') else
+                                  p.files if hasattr(p, 'files') else
+                                  p.objects if hasattr(p, 'objects') else None}
+                for p in properties
+            ]
+        
+        return payload
 
 class Page(Model):
     """Модель для страницы"""
     
     name: Optional[str] = None
+    title: Optional[str] = None  # Добавляем альтернативное поле
     content: Optional[str] = None
     author: Optional[str] = None
     tags: Optional[List[str]] = None
     
     class Meta:
         type_key = "page"
+        title_field = "name"  # Пробуем name сначала
 
 class Task(Model):
     """Модель для задачи"""
     
     name: Optional[str] = None
+    title: Optional[str] = None  # Добавляем альтернативное поле
     description: Optional[str] = None
     status: Optional[str] = None
     priority: Optional[str] = None
@@ -84,6 +146,7 @@ class Task(Model):
     
     class Meta:
         type_key = "task"
+        title_field = "name"  # Пробуем name сначала
 
 class Session:
     """Сессия для работы с Anytype как с ORM"""
@@ -111,11 +174,35 @@ class Session:
     def commit(self):
         """Сохранить все изменения"""
         for model in self._new_objects:
-            self.conn.objects.insert(
-                type_key=model.get_type_key(),
-                name=getattr(model, 'name', None),
-                properties=model.to_properties()
-            )
+            # Используем прямой API клиент для создания
+            # с правильным форматом данных
+            try:
+                # Пробуем создать через objects.insert
+                result = self.conn.objects.insert(
+                    type_key=model.get_type_key(),
+                    **{model.get_title_field(): getattr(model, model.get_title_field(), None)}
+                )
+                
+                # Если объект создан, обновляем его ID
+                if hasattr(result, 'id'):
+                    model.id = result.id
+                    
+            except Exception as e:
+                # Если не получилось, пробуем через прямой API
+                import httpx
+                headers = {"Authorization": f"Bearer {self.conn.client.api_key}"}
+                
+                payload = model.to_create_payload()
+                
+                with httpx.Client(base_url=self.conn.client.base_url, headers=headers) as client:
+                    response = client.post(f"/v1/spaces/{self.conn.space_id}/objects", json=payload)
+                    if response.status_code in [200, 201]:
+                        data = response.json()
+                        if 'object' in data and 'id' in data['object']:
+                            model.id = data['object']['id']
+                    else:
+                        raise Exception(f"Failed to create object: {response.text}")
+        
         self._new_objects.clear()
         self._dirty_objects.clear()
     
@@ -170,3 +257,8 @@ class Anytype:
     def session(self, space_id: str) -> Session:
         """Создать сессию для пространства"""
         return Session(self._db.get_space(space_id))
+    
+    @property
+    def client(self):
+        """Доступ к внутреннему клиенту для прямых запросов"""
+        return self._db.client
