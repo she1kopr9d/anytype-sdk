@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "MIT" }
 authors = [
-    { name = "Your Name", email = "your.email@example.com" },
+    { name = "Arseniy Konoplev", email = "she1kopr9d@icloud.com" },
 ]
 keywords = ["anytype", "api", "sdk", "client", "database", "orm", "pydantic"]
 classifiers = [
@@ -30,10 +30,10 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/anytype-sdk"
-Documentation = "https://github.com/yourusername/anytype-sdk#readme"
-Repository = "https://github.com/yourusername/anytype-sdk"
-Issues = "https://github.com/yourusername/anytype-sdk/issues"
+Homepage = "https://github.com/she1kopr9d/anytype-sdk"
+Documentation = "https://github.com/she1kopr9d/anytype-sdk#readme"
+Repository = "https://github.com/she1kopr9d/anytype-sdk"
+Issues = "https://github.com/she1kopr9d/anytype-sdk/issues"
 
 [project.optional-dependencies]
 dev = [

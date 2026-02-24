@@ -10,7 +10,7 @@ with open(os.path.join("anytype", "__init__.py"), "r", encoding="utf-8") as f:
     if version_match:
         version = version_match.group(1)
     else:
-        version = "0.1.3"
+        version = "0.1.4"
 
 # Read requirements
 with open("requirements.txt", "r", encoding="utf-8") as f:
