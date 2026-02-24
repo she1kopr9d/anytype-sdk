@@ -1,7 +1,10 @@
 from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional, List, Union, Any, Literal
+from typing import Optional, List, Union, Any, Literal, Generic, TypeVar
 from datetime import datetime
 from enum import Enum
+
+# TypeVar для Generic
+T = TypeVar('T')
 
 # Enums
 class Color(str, Enum):
@@ -461,10 +464,10 @@ class PaginationMeta(BaseModel):
     total: int
     has_more: bool
 
-class PaginatedResponse(BaseModel):
+class PaginatedResponse(BaseModel, Generic[T]):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     
-    data: List[Any]
+    data: List[T]
     pagination: PaginationMeta
 
 class SearchRequest(BaseModel):

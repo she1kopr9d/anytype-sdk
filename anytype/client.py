@@ -1,5 +1,5 @@
 import httpx
-from typing import Optional, Dict, Any, List, Union, TypeVar, Generic
+from typing import Optional, Dict, Any, List, Union, TypeVar, Generic, Type
 from pydantic import BaseModel
 from . import models
 from .exceptions import (
