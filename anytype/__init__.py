@@ -18,7 +18,7 @@ Python библиотека для работы с Anytype API с интерфе
     - AnytypeDB - максимально простой интерфейс
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from .client import AnytypeClient
 from . import models
