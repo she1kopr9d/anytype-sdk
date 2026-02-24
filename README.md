@@ -94,7 +94,7 @@ with at.connect("space-id") as session:
 
 ## 📚 Документация
 
-Полная документация доступна в [Wiki](https://github.com/yourusername/anytype-sdk/wiki).
+Полная документация доступна в [Wiki](https://github.com/she1kopr9d/anytype-sdk/wiki).
 
 ## 🧪 Разработка
 
